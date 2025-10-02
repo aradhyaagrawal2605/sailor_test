@@ -105,6 +105,20 @@ def initialize_model_parallel_from_file(
             tps_stage[j].add(len(node))
         tps_stage[j] = list(tps_stage[j])
 
+    print(f"------------------- CONFIG IS {config}")
+
+    # Build group with only TP_RANK=0
+    global _TP_0_GROUP
+    global _TP_0_RANKS
+    tp_ranks = []
+    for stage_config in config:
+        for stage_replica in stage_config:
+            tp_ranks.append(stage_replica[0])
+    group = torch.distributed.new_group(tp_ranks)
+    if rank in tp_ranks:
+        _TP_0_RANKS = tp_ranks
+        _TP_0_GROUP = group
+
      # 1. Build all data-parallel groups.
     all_data_parallel_group_ranks = []
     all_data_parallel_group_ranks_lists = []
@@ -400,6 +414,15 @@ def initialize_model_parallel(
 
     rank = torch.distributed.get_rank()
 
+    # Build group with only TP_RANK=0
+    global _TP_0_GROUP
+    global _TP_0_RANKS
+    tp_ranks = [rank for rank in range(world_size) if rank % tensor_model_parallel_size==0]
+    group = torch.distributed.new_group(tp_ranks)
+    if rank in tp_ranks:
+        _TP_0_RANKS = tp_ranks
+        _TP_0_GROUP = group
+
     # Build the data-parallel groups.
     global _DATA_PARALLEL_GROUP_LIST
     global _DATA_PARALLEL_GROUP_GLOO
@@ -632,6 +655,12 @@ def get_data_parallel_group_gloo():
         'data parallel group-gloo is not initialized'
     return _DATA_PARALLEL_GROUP_GLOO
 
+
+def get_tp_rank0_group():
+    """Get the group of all workers with tp rank 0"""
+    assert _TP_0_GROUP is not None, \
+        'TP RANK 0 not initialized'
+    return _TP_0_GROUP
 
 def get_embedding_group():
     """Get the embedding group the caller rank belongs to."""
@@ -1013,3 +1042,5 @@ def destroy_model_parallel():
     _MPU_PIPELINE_MODEL_PARALLEL_RANK = None
     global _GLOBAL_MEMORY_BUFFER
     _GLOBAL_MEMORY_BUFFER = None
+    global _TP_0_GROUP
+    _TP_0_GROUP = None

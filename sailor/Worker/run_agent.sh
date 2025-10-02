@@ -13,7 +13,6 @@ CONSTANT_ARGS=" \
     --data-path /root/sailor/third_party/Megatron-DeepSpeed/data/meg-gpt2-oscar-en-10k_text_document \
     --vocab-file /root/sailor/third_party/Megatron-DeepSpeed/data/gpt2-vocab.json \
     --merge-file /root/sailor/third_party/Megatron-DeepSpeed/data/gpt2-merges.txt \
-    --save-interval 1000 \
     --split 98,2,0 \
     --clip-grad 1.0 \
     --weight-decay 0.1 \
