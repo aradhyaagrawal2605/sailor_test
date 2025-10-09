@@ -21,34 +21,6 @@ CONSTANT_ARGS=" \
     --init-method-std 0.006 \
 "
 
-NO_CONTROLLER_ARGS="
-    --global_batch_size 1 \
-    --micro_batch_size 1 \
-    --num_stages 1 \
-    --rank $1 \
-    --world_size 4 \
-    --master_ip 127.0.0.1 \
-    --master_port 1234 \
-    --tensor-model-parallel-size 1 \
-    --pipeline-model-parallel-size 1 \
-    --data-parallel-size 1 \
-"
-
-NO_CONTROLLER_HET_ARGS="
-    --global_batch_size 2 \
-    --micro_batch_size 1 \
-    --num_stages 1 \
-    --rank $1 \
-    --world_size 1 \
-    --master_ip 127.0.0.1 \
-    --master_port 1234 \
-    --tensor-model-parallel-size $2 \
-    --pipeline-model-parallel-size 1 \
-    --data-parallel-size 1 \
-    --max-tensor-model-parallel-size 1 \
-    --distributed-config-file dist_config.json \
-"
-
 # MODEL ARGS
 MODEL_ARGS=" \
     --num-layers 16 \
@@ -65,8 +37,9 @@ python elastic_worker_agent.py \
     --deepspeed \
     --model-name OPT \
     --gpu-type V100 \
-    --train-iters 100 \
+    --train-iters 1000 \
     --results-dir tests \
+    --agent_port 50051 \
     --ds_config_file /root/sailor/third_party/Megatron-DeepSpeed/ds_config.json \
     $MODEL_ARGS \
     $CONSTANT_ARGS

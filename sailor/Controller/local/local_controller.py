@@ -11,7 +11,7 @@ from sailor.protos import orchestration_pb2, orchestration_pb2_grpc
 from sailor.protos.orchestration_pb2_grpc import (
     WorkerAgentStub, MasterControllerStub
 )
-from sailor.Worker.elastic_worker_agent import WORKER_AGENT_PORT, TRAINING_START_PORT
+from sailor.Worker.elastic_worker_agent import TRAINING_START_PORT
 from sailor.Planner.sailor_planner.cpp_src.planner import SailorPlanner
 from sailor.Planner.simulations.utils import parse_trace
 
@@ -25,17 +25,20 @@ def convert_trace(input_trace_file):
     for input in input_trace:
         duration = input["duration_sec"]
         nodes = input["nodes"]
-        trace_dict = {}
-        for node in nodes:
-            gpu_zone = f"{node[2]}_{node[1]}"
-            num_gpus = node[3]
-            if gpu_zone not in trace_dict:
-                trace_dict[gpu_zone] = 0
-            trace_dict[gpu_zone] += num_gpus
+        trace_dict = convert_node_list(nodes)
         output = [duration, trace_dict]
         output_trace.append(output)
     return output_trace
 
+def convert_node_list(node_list):
+    trace_dict = {}
+    for node in node_list:
+        gpu_zone = f"{node[2]}_{node[1]}"
+        num_gpus = node[3]
+        if gpu_zone not in trace_dict:
+            trace_dict[gpu_zone] = 0
+        trace_dict[gpu_zone] += num_gpus
+    return trace_dict
 
 class LocalController(Controller):
     def __init__(self, args) -> None:
@@ -43,8 +46,24 @@ class LocalController(Controller):
         self.args = args
         self.num_restarts = 0
 
-    def update_node(self, node):
-        pass
+    def get_available_nodes(self, all_nodes):
+        node_list = []
+        for node in all_nodes:
+            endpoint = node[0]
+            print(f"************ check endpoint {endpoint}")
+            try:
+                request = orchestration_pb2.CheckHealthRequest()
+                with grpc.insecure_channel(endpoint) as channel:
+                    stub = WorkerAgentStub(channel)
+                    response = stub.CheckHealth(request)
+                    print(response)
+                    if not response.processes_ok:
+                        continue
+                node_list.append(node)
+            except Exception as e:
+                print(f"Host {endpoint} is not available")
+
+        return node_list
 
     def update_nodes(self, cluster_config, training_config, node_list):
         if len(node_list) == 0:
@@ -84,7 +103,7 @@ class LocalController(Controller):
                     worker_configuration = orchestration_pb2.WorkerConfiguration(
                         ranks=tmp_degrees,
                         world_size=world_size,
-                        master_ip=node_list[0][0],
+                        master_ip=node_list[0][0].split(":")[0],
                         master_port=str(int(TRAINING_START_PORT)+self.num_restarts),
                         pipeline_parallelism=num_stages,
                         tensor_parallelism=tp_node,
@@ -102,8 +121,9 @@ class LocalController(Controller):
 
                     print(stage_id, worker_configuration, hparams)
 
+                    host, port = node[0].split(":")
                     executor.submit(self.notify_topology_change,
-                                   node, worker_configuration, hparams, node[0], WORKER_AGENT_PORT)
+                                   node, worker_configuration, hparams, host, port)
                     print(f"Sent training info to node: {node}")
                     node_rank += tp_node
                     node_list_idx += 1
@@ -113,8 +133,7 @@ class LocalController(Controller):
 
     def check_ready(self, node):
         request = orchestration_pb2.CheckReadyRequest(is_ready=1)
-        grpc_target = f'{node}:{WORKER_AGENT_PORT}'
-        with grpc.insecure_channel(grpc_target) as channel:
+        with grpc.insecure_channel(node) as channel:
             stub = WorkerAgentStub(channel)
             stub.CheckReady(request)
 
@@ -134,27 +153,65 @@ class LocalController(Controller):
             while (not self.check_if_ready(node[0])):
                 pass
 
-    def terminate_existing(self, prev_node_list, next_node_list):
+
+    def terminate_existing(self, prev_node_list, next_node_list, failed_nodes_list=[]):
         prev_nodes = [node[0] for node in prev_node_list]
         next_nodes = [node[0] for node in next_node_list]
+        failed_nodes = [node[0] for node in failed_nodes_list]
         print(f"prev_nodes is {prev_nodes}, next_nodes is {next_nodes}")
         for node in prev_nodes:
-            print(f"Sending kill request to node {node}")
-            self.send_kill_request(node, WORKER_AGENT_PORT, (node not in next_nodes))
+            if node not in failed_nodes:
+                print(f"Sending kill request to node {node}")
+                hostname, port = node.split(":")
+                self.send_kill_request(hostname, port, (node not in next_nodes))
 
 
+def get_plan(planner, input_planner_config, training_config):
+
+    sorted_plans = planner.get_sorted_plans(
+        cluster_config=input_planner_config,
+        training_config=training_config
+    )
+
+    if len(sorted_plans) == 0:
+        print("Not valid plan found! Sorry")
+        return {}
+
+    plan = sorted_plans[0]['pipeline_list'][0]
+    print(f"plan is {plan}")
+
+    layers_per_stage = list(([list(x) for x in plan['layers_per_stage']]))
+    print(layers_per_stage)
+
+    num_layers_per_stage = [len(x) for x in layers_per_stage]
+    print(num_layers_per_stage)
+
+    tmp_per_stage = []
+    rank = 0
+    for stage_config in plan['tmp_per_stage']:
+        stage_tmps = []
+        for replica in stage_config:
+            tp_replica = replica[1]
+            tps_this_replica = list(range(rank, rank+tp_replica))
+            stage_tmps.append(tps_this_replica)
+            rank += tp_replica
+        tmp_per_stage.append(stage_tmps)
+
+    cluster_config = {}
+    cluster_config['pipeline_parallelism'] = plan['num_stages']
+    cluster_config['tp_degrees'] = tmp_per_stage
+    cluster_config['data_parallelism'] = plan['dp'][0]
+    cluster_config['microbatch_size'] = sorted_plans[0]['mbs']
+    cluster_config['num_layers_per_stage'] = num_layers_per_stage
+    return cluster_config
 
 def main(args):
     with open(args.training_config_json, 'r') as f:
         training_config = json.load(f)
 
     os.environ['SAILOR_PATH'] = args.sailor_path
-    with open(args.trace_file, 'r') as f:
-        machine_info_trace = json.load(f)
-    gpu_trace = convert_trace(args.trace_file)
-
     controller = LocalController(args)
-    prev_node_list = None
+    prev_node_list = []
     planner = SailorPlanner(
             args.sailor_profile_file_dir,
             args.training_config_json,
@@ -163,71 +220,66 @@ def main(args):
             args.fp16
     )
 
-    for idx, (duration, num_gpus_config) in enumerate(gpu_trace):
-        input_planner_config = num_gpus_config
-        input_planner_config["max_cost"] = args.max_cost
-        input_planner_config["min_throughput"] = args.min_throughput
-        print(duration, input_planner_config)
+    if args.trace_file: # trace-based
+        with open(args.trace_file, 'r') as f:
+            machine_info_trace = json.load(f)
+        gpu_trace = convert_trace(args.trace_file)
 
-        # 1. get new plan
-        sorted_plans = planner.get_sorted_plans(
-            cluster_config=input_planner_config,
-            training_config=training_config
-        )
+        for idx, (duration, num_gpus_config) in enumerate(gpu_trace):
+            input_planner_config = num_gpus_config
+            input_planner_config["max_cost"] = args.max_cost
+            input_planner_config["min_throughput"] = args.min_throughput
+            print(duration, input_planner_config)
 
-        if len(sorted_plans) == 0:
-            raise Exception("Not valid plan found! Sorry")
-            exit(1)
+            plan_start = time.time()
+            cluster_config = get_plan(planner, input_planner_config, training_config)
+            print(cluster_config)
+            node_list = machine_info_trace[idx]["nodes"]
+            print(node_list)
+            print(f"[RECONFIGURATION] Planner time is {time.time() - plan_start}")
 
-        plan_start = time.time()
+            stop_start_time = time.time()
+            # 2. notify that config will change
+            if prev_node_list:
+                controller.terminate_existing(prev_node_list, node_list)
+            controller.wait_all_ready(node_list)
+            print(f"[RECONFIGURATION] Stop and cleanup time is {time.time() - stop_start_time}")
 
-        plan = sorted_plans[0]['pipeline_list'][0]
-        print(f"plan is {plan}")
+            # 3. send updated config
+            send_start_time = time.time()
+            controller.update_nodes(cluster_config, training_config, node_list)
+            print(f"[RECONFIGURATION] Worker Update time is {time.time() - send_start_time}")
 
-        layers_per_stage = list(([list(x) for x in plan['layers_per_stage']]))
-        print(layers_per_stage)
+            # # 4. sleep for now
+            time.sleep(duration)
+            prev_node_list = node_list
+    elif args.initial_config_file:
+        with open(args.initial_config_file, 'r') as f:
+            machine_info_trace = json.load(f)
 
-        num_layers_per_stage = [len(x) for x in layers_per_stage]
-        print(num_layers_per_stage)
+        while True:
+            node_list = controller.get_available_nodes(machine_info_trace[0]["nodes"])
+            failed_nodes = [node for node in prev_node_list if node not in node_list]
+            print(node_list, failed_nodes)
+            if node_list != prev_node_list:
+                num_gpus_config = convert_node_list(node_list) # TODO
+                print(f"num_gpus_config is {num_gpus_config}")
+                input_planner_config = num_gpus_config
+                input_planner_config["max_cost"] = args.max_cost
+                input_planner_config["min_throughput"] = args.min_throughput
 
-        tmp_per_stage = []
-        rank = 0
-        for stage_config in plan['tmp_per_stage']:
-            stage_tmps = []
-            for replica in stage_config:
-                tp_replica = replica[1]
-                tps_this_replica = list(range(rank, rank+tp_replica))
-                stage_tmps.append(tps_this_replica)
-                rank += tp_replica
-            tmp_per_stage.append(stage_tmps)
+                cluster_config = get_plan(planner, input_planner_config, training_config)
+                print(f"node_list is {node_list}")
+                if prev_node_list:
+                    controller.terminate_existing(prev_node_list, node_list, failed_nodes)
 
-        cluster_config = {}
-        cluster_config['pipeline_parallelism'] = plan['num_stages']
-        cluster_config['tp_degrees'] = tmp_per_stage
-        cluster_config['data_parallelism'] = plan['dp'][0]
-        cluster_config['microbatch_size'] = sorted_plans[0]['mbs']
-        cluster_config['num_layers_per_stage'] = num_layers_per_stage
-
-        print(cluster_config)
-        node_list = machine_info_trace[idx]["nodes"]
-        print(node_list)
-        print(f"[RECONFIGURATION] Planner time is {time.time() - plan_start}")
-
-        stop_start_time = time.time()
-        # 2. notify that config will change
-        if prev_node_list:
-            controller.terminate_existing(prev_node_list, node_list)
-        controller.wait_all_ready(node_list)
-        print(f"[RECONFIGURATION] Stop and cleanup time is {time.time() - stop_start_time}")
-
-        # 3. send updated config
-        send_start_time = time.time()
-        controller.update_nodes(cluster_config, training_config, node_list)
-        print(f"[RECONFIGURATION] Worker Update time is {time.time() - send_start_time}")
-
-        # # 4. sleep for now
-        time.sleep(duration)
-        prev_node_list = node_list
+                print(f"cluster_config is {cluster_config}")
+                controller.wait_all_ready(node_list)
+                controller.update_nodes(cluster_config, training_config, node_list)
+                prev_node_list = node_list
+            time.sleep(10)
+    else:
+        print("Please provide a --trace_file or a --initial_config_file option")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Trace controller')
@@ -244,7 +296,9 @@ if __name__ == "__main__":
                         help='Min througput (iters/sec)')
     parser.add_argument('--fp16', action='store_true', help='Use fp16')
     parser.add_argument('--sailor_path', type=str, required=True, help='Path to the sailor repo')
-    parser.add_argument('--trace_file', type=str, required=True, help='GPU availability trace file')
+    parser.add_argument('--trace_file', type=str, required=False, help='GPU availability trace file. If specified, the controller will train using the availability from the file')
+    parser.add_argument('--initial_config_file', type=str, required=False, help='Initial config. If specified, the controller will monitor the status of resources and scale up/down respectively')
+
 
     args = parser.parse_args()
     main(args)

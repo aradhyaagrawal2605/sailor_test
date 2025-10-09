@@ -51,6 +51,15 @@ class ElasticWorkerAgent(orchestration_pb2_grpc.WorkerAgentServicer):
         logger.info("----- got request from the controller -----")
         return orchestration_pb2.CheckReadyResponse()
 
+    def CheckHealth(self, request, context):
+        logger.info("----- got CheckHealth request from the controller -----")
+        processes_ok=True
+        for process in self.training_processes:
+            if not process.is_alive():
+                processes_ok=False
+                break
+        return orchestration_pb2.CheckHealthResponse(processes_ok=processes_ok) # TODO
+
     def Kill(self, request, context):
         logger.info("----- got kill request from the controller")
         with self.lock:
@@ -209,6 +218,7 @@ if __name__ == '__main__':
     choice_parse = pre_parser.parse_known_args()[0]
     model_name = choice_parse.model_name
     parser = argparse.ArgumentParser(description='parser for static args')
+    parser.add_argument('--agent_port', type=int, help='Port for gRPC agent', default=WORKER_AGENT_PORT)
     parser.add_argument('--bucket_name', type=str,
                         help='the name of the google cloud storage bucket')
     parser.add_argument('--remote_root_dir', type=str,
@@ -221,21 +231,10 @@ if __name__ == '__main__':
                         default=20, help='log every n steps')
     parser.add_argument('--mixed_precision_training', default=False, action='store_true',
                         help='whether to use mixed precision training')
-    parser.add_argument('--use_master_vm', default=False,
-                        action='store_true', help="use master VM to initialize PyTorch distributed group")
     parser.add_argument('--with_controller', default=False, action='store_true',
                         help='run with controller')
     parser.add_argument('--ds_config_file', type=str,
                         help='DeepSpeed config file', required=True)
-
-    ## for testing ##
-    parser.add_argument('--global_batch_size', type=int, default=0, help='Global batch size')
-    parser.add_argument('--micro_batch_size', type=int, default=0, help='Micro batch size')
-    parser.add_argument('--num_stages', type=int, default=0, help='Number of stages')
-    parser.add_argument('--rank', type=int, default=0, help='Worker rank')
-    parser.add_argument('--world_size', type=int, default=1, help='World size')
-    parser.add_argument('--master_ip', type=str, default="", help='Master IP')
-    parser.add_argument('--master_port', type=str, default="", help='Master Port')
 
     static_user_args = parser.parse_known_args()[0]
 
@@ -246,32 +245,30 @@ if __name__ == '__main__':
     # do compilation of fused kernels, to save time
     os.system("cd /root/sailor/third_party/Megatron-DeepSpeed/ && python do_load.py")
 
-    if static_user_args.with_controller:
-        server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-        agent = ElasticWorkerAgent(server, model_name, static_user_args)
-        orchestration_pb2_grpc.add_WorkerAgentServicer_to_server(
-            agent, server)
-        server.add_insecure_port(f'[::]:{WORKER_AGENT_PORT}')
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    agent = ElasticWorkerAgent(server, model_name, static_user_args)
+    orchestration_pb2_grpc.add_WorkerAgentServicer_to_server(agent, server)
+    server.add_insecure_port(f'[::]:{static_user_args.agent_port}')
 
-        def terminate(signum, _):
-            if agent.training_process is not None:
-                try:
-                    agent.training_process.terminate()
-                except Exception:
-                    logger.error(
-                        "failed to terminate the training process; here is the traceback:")
-                    logger.error(traceback.format_exc())
-                else:
-                    logger.info("the training process has been terminated")
-                finally:
-                    agent.training_process = None
-            done = server.stop(5)
-            done.wait()
-            logger.info(f"Received {signum}, stop complete!")
+    def terminate(signum, _):
+        if agent.training_process is not None:
+            try:
+                agent.training_process.terminate()
+            except Exception:
+                logger.error(
+                    "failed to terminate the training process; here is the traceback:")
+                logger.error(traceback.format_exc())
+            else:
+                logger.info("the training process has been terminated")
+            finally:
+                agent.training_process = None
+        done = server.stop(5)
+        done.wait()
+        logger.info(f"Received {signum}, stop complete!")
 
-        logger.info("starting server")
-        server.start()
-        #signal.signal(signal.SIGTERM, terminate)
-        server.wait_for_termination()
+    logger.info("starting server")
+    server.start()
+    #signal.signal(signal.SIGTERM, terminate)
+    server.wait_for_termination()
 
-        logger.info("server closed")
+    logger.info("server closed")

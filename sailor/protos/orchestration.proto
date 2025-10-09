@@ -12,6 +12,7 @@ service WorkerAgent {
   rpc ConfigurationChange(WorkerConfigurationRequest) returns (WorkerConfigurationResponse) {}
   rpc CheckReady(CheckReadyRequest) returns (CheckReadyResponse) {}
   rpc Kill(KillRequest) returns (KillResponse) {}
+  rpc CheckHealth(CheckHealthRequest) returns (CheckHealthResponse) {}
 }
 
 message TopologyChangeRequest {
@@ -124,4 +125,11 @@ message KillRequest {
 }
 
 message KillResponse {
+}
+
+message CheckHealthRequest {
+}
+
+message CheckHealthResponse {
+  bool processes_ok = 1;
 }

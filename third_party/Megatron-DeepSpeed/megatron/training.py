@@ -221,6 +221,13 @@ def pretrain(train_valid_test_dataset_provider,
             to set already parse arguments.
     """
 
+    if cleanup_event:
+        # for NCCL error handling - only if run with controller/agent support
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "2"
+        os.environ["TORCH_NCCL_ENABLE_MONITORING"] = "1"
+        os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "70"
+        os.environ["TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"] = "1000"
+
     reconf_start_time = time.time()
     # Initalize and get arguments, timers, and Tensorboard writer.
 
@@ -296,8 +303,11 @@ def pretrain(train_valid_test_dataset_provider,
         chk_manager = None
 
     if args.sailor_profile:
-    	hook_params.set_params('tied_modules', 'loss_fn')
-    	add_hooks(model[0].module, take_time_fwd_pre, take_time_and_mem_fwd, take_time_bwd_pre, take_time_bwd)
+        if isinstance(model[0].module, GPTModelPipe):
+    	    hook_params.set_params('tied_modules', 'loss_fn')
+        else:
+    	    hook_params.set_params('1', 'loss_fn')
+        add_hooks(model[0].module, take_time_fwd_pre, take_time_and_mem_fwd, take_time_bwd_pre, take_time_bwd)
 
     timers('model-and-optimizer-setup').stop()
     print('after model, optimizer, and learning rate '
@@ -459,6 +469,7 @@ def pretrain(train_valid_test_dataset_provider,
     print(f"[RECONFIGURATION] Total reconf time took {total_reconf_time} sec")
 
     # in a while loop for restarts
+    exception = False
     while True:
 
         if not args.skip_train and not args.oobleck_profile and not args.varuna_profile:
@@ -470,7 +481,7 @@ def pretrain(train_valid_test_dataset_provider,
 
             iteration = start_iter
             if args.do_train and args.train_iters > 0:
-                iteration = train(start_iter, forward_step_func,
+                iteration, exception = train(start_iter, forward_step_func,
                                 model, optimizer, opt_param_scheduler,
                                 train_data_iterator, valid_data_iterator,
                                 process_non_loss_data_func, chk_manager, galvatron_profiler, cleanup_event)
@@ -607,7 +618,7 @@ def pretrain(train_valid_test_dataset_provider,
                 with open(res_file, 'w') as f:
                     json.dump(profile, f, indent=2)
 
-        if cleanup_event is None or not cleanup_event.is_set():
+        if (cleanup_event is None) or (not cleanup_event.is_set() and not exception):
             print(f"Training done!")
             if chk_manager:
                 chk_manager.kill_checkpoint()
@@ -633,6 +644,9 @@ def pretrain(train_valid_test_dataset_provider,
             print(f"************************************************* RANK {old_rank}, BEFORE CLEANUP: {torch.cuda.memory.memory_allocated()}, {torch.cuda.memory.memory_reserved()}")
 
             ############### cleanup
+            if exception:
+                print(f"WAITING FOR CLEANUP SIGNAL")
+                cleanup_event.wait()
 
             # 1. process groups
             destroy_megatron()
@@ -664,7 +678,7 @@ def pretrain(train_valid_test_dataset_provider,
             cleanup_event.clear()
             print(f"RANK {old_rank}, CLEANUP DONE")
 
-            restart_event.wait() # TODO: fix for scale down
+            restart_event.wait()
             restart_event.clear()
 
             # update args and reinitialize
@@ -784,7 +798,6 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
         post_process = mpu.is_pipeline_last_stage()
         add_encoder = True
         add_decoder = True
-        print(f"model_prov is {model_provider_func}")
         model = model_provider_func(
             pre_process=pre_process,
             post_process=post_process,
@@ -1004,7 +1017,6 @@ def setup_model_and_optimizer(model_provider_func,
         # opt_param_scheduler is the old lr_scheduler plus weight decay scheduling
         opt_param_scheduler = get_optimizer_param_scheduler(optimizer)
 
-
     if args.deepspeed:
         print_rank_0("DeepSpeed is enabled.")
         pp = mpu.get_pipeline_model_parallel_world_size()
@@ -1111,9 +1123,7 @@ def train_step(forward_step_func, data_iterator,
     args = get_args()
     timers = get_timers()
 
-    print(f"ENTER TRAIN_STEP")
-
-    if args.deepspeed and args.ds_pipeline_enabled:
+    try:
         skipped_iter = 0
         num_zeros_in_grad = 0
         assert isinstance(model[0], deepspeed.PipelineEngine)
@@ -1140,116 +1150,10 @@ def train_step(forward_step_func, data_iterator,
         if additional_losses is not None:
             loss_dict.update(additional_losses)
         grad_norm = model[0].get_global_grad_norm()
-
-        return loss_dict, skipped_iter, grad_norm, num_zeros_in_grad
-
-    # Set grad to zero.
-    if not args.deepspeed:
-        if args.DDP_impl == 'local' and args.use_contiguous_buffers_in_local_ddp:
-            for partition in model:
-                partition.zero_grad_buffer()
-        optimizer.zero_grad()
-
-    # Forward pass.
-    timers('forward-backward', log_level=1).start(
-        barrier=args.barrier_with_L1_time)
-    forward_backward_func = get_forward_backward_func()
-    if args.mos or args.kd:
-        # args.teacher_forward is used as global variable to enable kd loss
-        # calculation in forward pass. Users do not need to set it in the
-        # command line to use kd.
-        args.teacher_forward = True
-
-    # set timers to None if none of the timers in fwd_bwd are active, just to save the checks
-    if args.timing_log_level < 2:
-        config.timers = None
-
-    losses_reduced = forward_backward_func(
-        forward_step_func=forward_step_func,
-        data_iterator=data_iterator,
-        model=model,
-        num_microbatches=get_num_microbatches(),
-        seq_length=args.seq_length,
-        micro_batch_size=args.micro_batch_size,
-        decoder_seq_length=args.decoder_seq_length,
-        forward_only=False)
-
-    # reset timers if necessary
-    if config.timers is None:
-        config.timers = timers
-    timers('forward-backward').stop()
-    if args.mos or args.kd:
-        args.teacher_forward = False
-
-    # Empty unused memory.
-    if args.empty_unused_memory_level >= 1:
-        torch.cuda.empty_cache()
-
-    # Reduce gradients.
-    if not args.deepspeed:
-        optimizer.reduce_model_grads(args, timers)
-
-    # Vision gradients.
-    if args.vision_pretraining and args.vision_pretraining_type == "dino":
-        unwrapped_model = unwrap_model(model[0],
-                                       (torchDDP, LocalDDP, Float16Module))
-        unwrapped_model.cancel_gradients_last_layer(args.curr_iteration)
-
-    # Update parameters.
-    timers('optimizer', log_level=1).start(barrier=args.barrier_with_L1_time)
-    if args.deepspeed:
-        increment = get_num_microbatches() * \
-                    args.micro_batch_size * \
-                    args.data_parallel_size
-        model[0].step(lr_kwargs={'increment': increment})
-        update_successful = model[0].was_step_applied()
-    else:
-        update_successful, grad_norm, num_zeros_in_grad = optimizer.step(args, timers)
-    timers('optimizer').stop()
-
-    # Gather params.
-    if not args.deepspeed and update_successful:
-        optimizer.gather_model_params(args, timers)
-
-    # Vision momentum.
-    if args.vision_pretraining and args.vision_pretraining_type == "dino":
-        unwrapped_model = unwrap_model(model[0],
-                                       (torchDDP, LocalDDP, Float16Module))
-        unwrapped_model.update_momentum(args.curr_iteration)
-
-    # Update learning rate.
-    if args.deepspeed:
-        skipped_iter = 0
-        grad_norm = None
-        num_zeros_in_grad = None
-
-        loss_reduced = {}
-        for key in losses_reduced[0]:
-            losses_reduced_for_key = [x[key] for x in losses_reduced]
-            loss_reduced[key] = sum(losses_reduced_for_key) / len(losses_reduced_for_key)
-        return loss_reduced, skipped_iter, grad_norm, num_zeros_in_grad
-    else:
-        if update_successful:
-            increment = get_num_microbatches() * \
-                        args.micro_batch_size * \
-                        args.data_parallel_size
-            opt_param_scheduler.step(increment=increment)
-            skipped_iter = 0
-        else:
-            skipped_iter = 1
-
-        # Empty unused memory.
-        if args.empty_unused_memory_level >= 2:
-            torch.cuda.empty_cache()
-
-        if mpu.is_pipeline_last_stage(ignore_virtual=True):
-            # Average loss across microbatches.
-            loss_reduced = {}
-            for key in losses_reduced[0]:
-                losses_reduced_for_key = [x[key] for x in losses_reduced]
-                loss_reduced[key] = sum(losses_reduced_for_key) / len(losses_reduced_for_key)
-            return loss_reduced, skipped_iter, grad_norm, num_zeros_in_grad
-    return {}, skipped_iter, grad_norm, num_zeros_in_grad
+        return loss_dict, skipped_iter, grad_norm, num_zeros_in_grad, False
+    except RuntimeError as e:
+        print(f"-------------- GOT EXCEPTION {e}")
+        return None, None, None, None, True
 
 
 def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
@@ -1732,7 +1636,7 @@ def train(start_iteration, forward_step_func, model, optimizer, opt_param_schedu
         if cleanup_event:
             if cleanup_event.is_set():
                 print(f"[RECONFIGURATION] Time to restart!")
-                return iteration
+                return iteration, False
 
         update_num_microbatches(args.consumed_train_samples)
         if args.deepspeed:
@@ -1751,7 +1655,7 @@ def train(start_iteration, forward_step_func, model, optimizer, opt_param_schedu
             args.curriculum_seqlen = curriculum_seqlen
         args.curr_iteration = iteration
 
-        loss_dict, skipped_iter, grad_norm, num_zeros_in_grad = \
+        loss_dict, skipped_iter, grad_norm, num_zeros_in_grad, exception = \
             train_step(forward_step_func,
                     train_data_iterator,
                     model,
@@ -1760,6 +1664,8 @@ def train(start_iteration, forward_step_func, model, optimizer, opt_param_schedu
                     config,
                     iteration,
                     galvatron_profiler)
+        if exception:
+            return iteration, True
 
         if galvatron_profiler:
             galvatron_profiler.post_profile_memory(iteration)
@@ -1848,7 +1754,7 @@ def train(start_iteration, forward_step_func, model, optimizer, opt_param_schedu
                 # end_checkp = time.time()
                 # print(f"Checkpoint time was {end_checkp-start_checkp} sec")
 
-    return iteration
+    return iteration, False
 
 
 def evaluate(forward_step_func,

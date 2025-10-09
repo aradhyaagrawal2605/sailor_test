@@ -250,7 +250,7 @@ def _initialize_distributed():
         )
     # Call the init process
     if args.deepspeed or args.ds_inference:
-        deepspeed.init_distributed()
+        deepspeed.init_distributed(timeout=timedelta(minutes=args.distributed_timeout_minutes))
     else:
         if not torch.distributed.is_initialized():
             torch.distributed.init_process_group(
@@ -274,12 +274,14 @@ def _initialize_distributed():
             if args.distributed_config_file:
                 mpu.initialize_model_parallel_from_file(
                     args.pipeline_model_parallel_size,
-                    args.distributed_config_file
+                    args.distributed_config_file,
+                    args.distributed_timeout_minutes
                 )
             else:
                 mpu.initialize_model_parallel(args.tensor_model_parallel_size,
                                             args.pipeline_model_parallel_size,
                                             args.ds_sequence_parallel_size,
+                                            args.distributed_timeout_minutes,
                                             args.virtual_pipeline_model_parallel_size,
                                             args.pipeline_model_parallel_split_rank,
                                             use_distributed_optimizer=args.use_distributed_optimizer)
