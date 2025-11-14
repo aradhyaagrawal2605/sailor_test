@@ -97,7 +97,7 @@ class SimulatorOP():
 
         # single-zone
         home = expanduser("~")
-        with open(f'{home}/sailor/sailor/providers/network_coeffs_all_homo.json', 'r') as f:
+        with open(f'/workspaces/sailor_test/sailor/providers/network_coeffs_all_homo.json', 'r') as f:
             network_coeffs_dict = json.load(f)["inter"]
 
         self.network_coeffs = {}

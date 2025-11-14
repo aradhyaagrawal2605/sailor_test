@@ -21,14 +21,14 @@ class SailorPlanner():
 
         home_dir = os.environ.get('SAILOR_PATH')
         arch = subprocess.check_output(['uname', '-m']).decode('utf-8')[:-1]
-        lib_path = f"{home_dir}/sailor/sailor/Planner/sailor_planner/cpp_src"
+        lib_path = f"{home_dir}/sailor/Planner/sailor_planner/cpp_src"
 
         os.system(f"cd {lib_path} && make clean && make libplanner.so")
         import sailor.Planner.sailor_planner.cpp_src.libplanner as libplanner
 
-        network_coeff_path = f"{home_dir}/sailor/sailor/providers/multizone_bandwidths_het.json"
-        model_mem_info = f"{home_dir}/sailor/sailor/Planner/llm_info.json"
-        communication_cost_file = f"{home_dir}/sailor/sailor/providers/gcp/communication_cost.json"
+        network_coeff_path = f"{home_dir}/sailor/providers/multizone_bandwidths_het.json"
+        model_mem_info = f"{home_dir}/sailor/Planner/llm_info.json"
+        communication_cost_file = f"{home_dir}/sailor/providers/gcp/communication_cost.json"
 
         print(f"From Python, heterogeneous is {heterogeneous}, objective is {objective}")
         assert objective in ["throughput", "iteration_cost"]

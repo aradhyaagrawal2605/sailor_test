@@ -30,10 +30,10 @@ class MetisPlanner(BaselinePlanner):
             self.training_config = json.load(f)
 
         home_dir = os.environ.get('SAILOR_PATH')
-        with open(f"{home_dir}/sailor/sailor/providers/intra_node_bandwidths.json", 'r') as f:
+        with open(f"{home_dir}/providers/intra_node_bandwidths.json", 'r') as f:
             self.intra_network_config = json.load(f)
 
-        with open(f"{home_dir}/sailor/sailor/providers/multizone_bandwidths_het.json", 'r') as f:
+        with open(f"{home_dir}/providers/multizone_bandwidths_het.json", 'r') as f:
             self.inter_network_config = json.load(f)
 
 
