@@ -605,7 +605,7 @@ struct ParallelismConfig *SailorPlanner::solve_dp(
                 {
                     int gpu_count = zone.second[idx];
 
-                    if (tmp_degrees[idx].size() > 0 && tmp_degrees[idx][og_stage_idx + 1])
+                    if (tmp_degrees[idx].size() > 0 && og_stage_idx+1<tmp_degrees[idx].size() && tmp_degrees[idx][og_stage_idx + 1])
                     {
                         next_stage_max_dp += gpu_count / tmp_degrees[idx][og_stage_idx + 1];
                     }
