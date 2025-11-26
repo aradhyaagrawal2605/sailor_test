@@ -18,7 +18,7 @@ planner_utils.o: planner_utils.cpp
 	$(CC) $(CFLAGS) -fPIC -c planner_utils.cpp -ljsoncpp -o planner_utils.o
 
 libplanner.so: planner.o read_json.o training.o planner_utils.o network_utils.o
-	$(CC) $(CFLAGS) -fPIC -shared -I/usr/include/python3.12  $(python3 -m pybind11 --includes) read_json.o training.o planner_utils.o network_utils.o planner.o -ljsoncpp -o libplanner.cpython-310-$(ARCH)-linux-gnu.so
+	$(CC) $(CFLAGS) -fPIC -shared -I/usr/include/python3.12  $(python3 -m pybind11 --includes) read_json.o training.o planner_utils.o network_utils.o planner.o -ljsoncpp -o libplanner.cpython-312-$(ARCH)-linux-gnu.so
 
 all:
 	make libplanner.so
