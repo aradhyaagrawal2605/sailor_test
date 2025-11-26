@@ -1,0 +1,173 @@
+python3 -m sailor.Planner.simulations.simulator \
+  --sailor_path /workspaces/sailor_test/sailor \
+  --trace_file /workspaces/sailor_test/sailor/Planner/simulations/configs/gpu_trace_heterogeneous_imbalanced.csv \
+  --basic_cluster_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/basic_cluster_config.json \
+  --training_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/training_config_opt_350.json \
+  --simulator_profile_file /workspaces/sailor_test/sailor/Planner/simulations/profiles_tmp.json \
+  --result_dir_path /workspaces/sailor_test/sailor/Planner/simulations/results \
+  --quotas_dict /workspaces/sailor_test/sailor/Planner/sailor_planner/dummy_quotas_dict.json \
+  --objective throughput \
+  --fp16 \
+  --planner AMP \
+  --planner_profile_file /workspaces/sailor_test/sailor/Planner/baselines/AMP/profiles/OPT-350/A100-40/profile_1.npy
+
+Done for AMP
+Throughput: 0.025245975361357535
+Cost per iteration: 4.314308434728173
+Plot saved to /workspaces/sailor_test/sailor/Planner/simulations/results/AMP_OPT-350_plot.png
+
+
+Can also add
+  --max_cost 1.2 \
+  --min_throughput 0.2 \
+
+For Piper
+python3 -m sailor.Planner.simulations.simulator \
+  --sailor_path /workspaces/sailor_test/sailor \
+  --trace_file /workspaces/sailor_test/sailor/Planner/simulations/configs/gpu_trace_heterogeneous_imbalanced.csv \
+  --basic_cluster_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/basic_cluster_config.json \
+  --training_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/training_config_opt_350.json \
+  --simulator_profile_file /workspaces/sailor_test/sailor/Planner/simulations/profiles_tmp.json \
+  --result_dir_path /workspaces/sailor_test/sailor/Planner/simulations/results \
+  --quotas_dict /workspaces/sailor_test/sailor/Planner/sailor_planner/dummy_quotas_dict.json \
+  --objective throughput \
+  --fp16 \
+  --planner Piper \
+  --planner_profile_file /workspaces/sailor_test/sailor/Planner/baselines/Piper/profiles/OPT-350/A100-40/profile.json
+
+Done for Piper
+Throughput: 0.06649137432527549
+Cost per iteration: 0.4910758943163989
+Plot saved to /workspaces/sailor_test/sailor/Planner/simulations/results/Piper_OPT-350_plot.png
+
+For Aceso
+python3 -m sailor.Planner.simulations.simulator \
+  --sailor_path /workspaces/sailor_test/sailor \
+  --trace_file /workspaces/sailor_test/sailor/Planner/simulations/configs/gpu_trace_heterogeneous_imbalanced.csv \
+  --basic_cluster_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/basic_cluster_config.json \
+  --training_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/training_config_opt_350.json \
+  --simulator_profile_file /workspaces/sailor_test/sailor/Planner/simulations/profiles_tmp.json \
+  --result_dir_path /workspaces/sailor_test/sailor/Planner/simulations/results \
+  --quotas_dict /workspaces/sailor_test/sailor/Planner/sailor_planner/dummy_quotas_dict.json \
+  --objective throughput \
+  --fp16 \
+  --planner Aceso \
+  --planner_profile_file /workspaces/sailor_test/sailor/Planner/baselines/Aceso/profiler/A100-40 \
+
+Syntax Error :
+  File "/workspaces/sailor_test/sailor/Planner/simulations/runtime_simulator_op.py", line 230, in get_time_per_pipeline
+    fwd_bwd += profiled_time[str(mbs[j])][str(tp[j])][str(algo[j])][str(ops[j])][0]
+               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+TypeError: list indices must be integers or slices, not str
+
+
+For Atlas
+python3 -m sailor.Planner.simulations.simulator \
+  --sailor_path /workspaces/sailor_test/sailor \
+  --trace_file /workspaces/sailor_test/sailor/Planner/simulations/configs/gpu_trace_heterogeneous_imbalanced.csv \
+  --basic_cluster_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/basic_cluster_config.json \
+  --training_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/training_config_opt_350.json \
+  --simulator_profile_file /workspaces/sailor_test/sailor/Planner/simulations/profiles_tmp.json \
+  --result_dir_path /workspaces/sailor_test/sailor/Planner/simulations/results \
+  --quotas_dict /workspaces/sailor_test/sailor/Planner/sailor_planner/dummy_quotas_dict.json \
+  --objective throughput \
+  --fp16 \
+  --planner Atlas \
+  --planner_profile_file /workspaces/sailor_test/sailor/Planner/baselines/Aceso/profiler/A100-40/profiled-data-fp16/OPT-350_mbs1_tp1_algo0.csv \
+
+It doesnt seem to have its own profiling data, throws error when tried with other planners'.
+
+For Galvatron
+python3 -m sailor.Planner.simulations.simulator \
+  --sailor_path /workspaces/sailor_test/sailor \
+  --trace_file /workspaces/sailor_test/sailor/Planner/simulations/configs/gpu_trace_heterogeneous_imbalanced.csv \
+  --basic_cluster_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/basic_cluster_config.json \
+  --training_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/training_config_opt_350.json \
+  --simulator_profile_file /workspaces/sailor_test/sailor/Planner/simulations/profiles_tmp.json \
+  --result_dir_path /workspaces/sailor_test/sailor/Planner/simulations/results \
+  --quotas_dict /workspaces/sailor_test/sailor/Planner/sailor_planner/dummy_quotas_dict.json \
+  --objective throughput \
+  --fp16 \
+  --planner Galvatron \
+  --planner_profile_file /workspaces/sailor_test/sailor/Planner/baselines/Galvatron/profiles/OPT-350/A100-40/ \
+
+I had to manually execute the dp_core.cpp file 
+Throughput: 0.11001876522116529
+Cost per iteration: 0.29678856189188985
+Plot saved to /workspaces/sailor_test/sailor/Planner/simulations/results/Galvatron_OPT-350_plot.png
+
+
+For Metis
+python3 -m sailor.Planner.simulations.simulator \
+  --sailor_path /workspaces/sailor_test/sailor \
+  --trace_file /workspaces/sailor_test/sailor/Planner/simulations/configs/gpu_trace_heterogeneous_imbalanced.csv \
+  --basic_cluster_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/basic_cluster_config.json \
+  --training_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/training_config_opt_350.json \
+  --simulator_profile_file /workspaces/sailor_test/sailor/Planner/simulations/profiles_tmp.json \
+  --result_dir_path /workspaces/sailor_test/sailor/Planner/simulations/results \
+  --quotas_dict /workspaces/sailor_test/sailor/Planner/sailor_planner/dummy_quotas_dict.json \
+  --objective throughput \
+  --fp16 \
+  --planner Metis \
+  --planner_profile_file /workspaces/sailor_test/sailor/Planner/baselines/Metis/profiles/OPT-350/ \
+
+Done
+Throughput: 0.13749200776194734
+Cost per iteration: 0.7921836782907838
+Plot saved to /workspaces/sailor_test/sailor/Planner/simulations/results/Metis_OPT-350_plot.png
+
+
+python3 -m sailor.Planner.simulations.simulator \
+  --sailor_path /workspaces/sailor_test/sailor \
+  --trace_file /workspaces/sailor_test/sailor/Planner/simulations/configs/gpu_trace_heterogeneous_imbalanced.csv \
+  --basic_cluster_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/basic_cluster_config.json \
+  --training_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/training_config_opt_350.json \
+  --simulator_profile_file /workspaces/sailor_test/sailor/Planner/simulations/profiles_tmp.json \
+  --result_dir_path /workspaces/sailor_test/sailor/Planner/simulations/results \
+  --quotas_dict /workspaces/sailor_test/sailor/Planner/sailor_planner/dummy_quotas_dict.json \
+  --objective throughput \
+  --fp16 \
+  --planner Varuna \
+  --planner_profile_file /workspaces/sailor_test/sailor/Planner/baselines/Varuna/profiles/OPT-350/A100-40/profile_1.json \
+
+Syntax Error:
+  File "/workspaces/sailor_test/sailor/Planner/baselines/Varuna/auto_config.py", line 100, in process_config
+    batch_time = self.get_simulated_time(pp_size, num_microbatches, send_time,
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/sailor_test/sailor/Planner/baselines/Varuna/auto_config.py", line 161, in get_simulated_time
+    batch_time = float(batch_time.split(" ")[-1])
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: could not convert string to float: ''
+
+
+
+python3 -m sailor.Planner.simulations.simulator \
+  --sailor_path /workspaces/sailor_test/sailor \
+  --trace_file /workspaces/sailor_test/sailor/Planner/simulations/configs/gpu_trace_heterogeneous_imbalanced.csv \
+  --basic_cluster_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/basic_cluster_config.json \
+  --training_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/training_config_opt_350.json \
+  --simulator_profile_file /workspaces/sailor_test/sailor/Planner/simulations/profiles_tmp.json \
+  --result_dir_path /workspaces/sailor_test/sailor/Planner/simulations/results \
+  --quotas_dict /workspaces/sailor_test/sailor/Planner/sailor_planner/dummy_quotas_dict.json \
+  --objective throughput \
+  --fp16 \
+  --planner AMP \
+  --planner_profile_file /workspaces/sailor_test/sailor/Planner/baselines/AMP/profiles/OPT-350/A100-40/profile_1.npy
+
+For Sailor
+python3 -m sailor.Planner.simulations.simulator \
+  --sailor_path /workspaces/sailor_test/sailor \
+  --trace_file /workspaces/sailor_test/sailor/Planner/simulations/configs/gpu_trace_heterogeneous_imbalanced.csv \
+  --basic_cluster_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/basic_cluster_config.json \
+  --training_config_json /workspaces/sailor_test/sailor/Planner/simulations/configs/training_config_opt_350.json \
+  --simulator_profile_file /workspaces/sailor_test/sailor/Planner/simulations/profiles_tmp.json \
+  --result_dir_path /workspaces/sailor_test/sailor/Planner/simulations/results \
+  --quotas_dict /workspaces/sailor_test/sailor/Planner/sailor_planner/dummy_quotas_dict.json \
+  --objective throughput \
+  --fp16 \
+  --planner SAILOR \
+  --planner_profile_file /workspaces/sailor_test/sailor/Planner/sailor_planner/profiles/OPT-350/A100-40
+
+
+  python3 -c "import numpy as np; data = np.load('sailor/Planner/sailor_planner/profiles/OPT-350/A100-40/profile.json', allow_pickle=True).item(); print('Available GPU Counts:', data.keys())"
+

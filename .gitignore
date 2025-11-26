@@ -67,10 +67,8 @@ __pycache__/
 *.internal
 
 # CSV files
-*.csv
 
 # TXT files
-*.txt
 
 # Distribution / packaging
 .Python
